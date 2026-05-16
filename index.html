@@ -133,17 +133,6 @@ const auth = firebase.auth();
 const ADMIN_EMAILS = ["xxetali46@gmail.com", "xxetali47@gmail.com"];
 const CLICK_COMMISSION = 0.02;
 
-// جلب الـ IP الحقيقي للزائر
-async function getUserIP() {
-    try {
-        const response = await fetch('https://api.ipify.org?format=json');
-        const data = await response.json();
-        return data.ip;
-    } catch (error) {
-        return 'unknown_' + Date.now();
-    }
-}
-
 // جلب الرابط العالمي من قاعدة البيانات أو استخدام افتراضي
 let GLOBAL_REDIRECT_LINK = "https://hp.funroom.store/a/8nw6emt2";
 db.ref('settings/redirectLink').on('value', snap => {
@@ -168,34 +157,39 @@ function checkAndRedirect() {
     const params = new URLSearchParams(window.location.search);
     const refId = params.get("ref");
     if (refId) {
+        // منع النقرات المتكررة السريعة من نفس الجلسة
+        if (sessionStorage.getItem('redirecting')) return;
+        sessionStorage.setItem('redirecting', 'true');
+        
         document.getElementById('loading-screen').classList.remove('hidden');
         
-        getUserIP().then(ip => {
-            // نشوف إذا هذا الـ IP نقر قبل على هذا المسوّق
-            db.ref('clicks_log/' + refId).once('value', snap => {
-                const clicksLog = snap.val() || {};
-                const ipAlreadyClicked = Object.values(clicksLog).some(entry => entry === ip);
+        fetch('https://api.ipify.org?format=json')
+            .then(response => response.json())
+            .then(data => {
+                const ip = data.ip;
                 
-                if (!ipAlreadyClicked) {
-                    // IP جديد، نحسب النقرة ونسجل الـ IP
-                    db.ref('clicks_log/' + refId).push(ip);
+                db.ref('clicks_log/' + refId).once('value').then(snap => {
+                    const clicksLog = snap.val() || {};
+                    const ipAlreadyClicked = Object.values(clicksLog).some(entry => entry === ip);
                     
-                    db.ref('users/' + refId).transaction(d => {
-                        if (d) {
-                            d.clicks = (d.clicks || 0) + 1;
-                            d.todayBalance = Number(((d.todayBalance || 0) + CLICK_COMMISSION).toFixed(2));
-                            d.totalBalance = Number(((d.totalBalance || 0) + CLICK_COMMISSION).toFixed(2));
-                        }
-                        return d;
-                    });
-                }
-                
-                // نحول للرابط الإعلاني سواء حسبنا أو لا
-                setTimeout(() => {
-                    window.location.href = GLOBAL_REDIRECT_LINK;
-                }, 500);
+                    if (!ipAlreadyClicked) {
+                        db.ref('clicks_log/' + refId).push(ip);
+                        db.ref('users/' + refId).transaction(d => {
+                            if (d) {
+                                d.clicks = (d.clicks || 0) + 1;
+                                d.todayBalance = Number(((d.todayBalance || 0) + CLICK_COMMISSION).toFixed(2));
+                                d.totalBalance = Number(((d.totalBalance || 0) + CLICK_COMMISSION).toFixed(2));
+                            }
+                            return d;
+                        });
+                    }
+                    
+                    window.location.replace(GLOBAL_REDIRECT_LINK);
+                });
+            })
+            .catch(() => {
+                window.location.replace(GLOBAL_REDIRECT_LINK);
             });
-        });
     }
 }
 
